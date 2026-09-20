@@ -1,0 +1,61 @@
+name: build-cli
+
+on:
+  push:
+    branches: [cli-build]
+    paths:
+      - '.github/workflows/build-cli.yml'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'WeKnora ref to build (branch/tag/sha)'
+        required: false
+        default: 'main'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: windows, goarch: amd64, ext: '.exe' }
+          - { goos: linux,   goarch: amd64, ext: '' }
+          - { goos: darwin,  goarch: arm64, ext: '' }
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Fetch upstream ref
+        if: github.event_name == 'workflow_dispatch' && inputs.ref != 'main'
+        run: |
+          git remote add upstream https://github.com/Tencent/WeKnora.git
+          git fetch --depth 1 upstream '${{ inputs.ref }}'
+          git checkout --detach FETCH_HEAD
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Build weknora CLI
+        working-directory: cli
+        env:
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p ../dist
+          go build -trimpath -ldflags "-s -w" \
+            -o "../dist/weknora-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}" .
+          ls -lh ../dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: weknora-cli-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
